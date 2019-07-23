@@ -1,10 +1,6 @@
 package SiteMap;
 
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.ResultSet;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 
 /**
  * Imported class from website: https://www.programcreek.com/2012/12/how-to-make-a-web-crawler-using-java/

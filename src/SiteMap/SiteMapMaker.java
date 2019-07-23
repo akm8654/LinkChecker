@@ -1,7 +1,7 @@
 package SiteMap;
 
 import java.sql.SQLException;
-import java.util.*;
+import java.util.Scanner;
 
 public class SiteMapMaker {
     /**
@@ -16,13 +16,13 @@ public class SiteMapMaker {
      * @param logMsg the message to log
      */
     private static void dPrint(Object logMsg) {
-        if (DEBUG){
+        if (DEBUG) {
             System.out.println(logMsg);
         }
     }
 
 
-    public static void main(String[] args){
+    public static void main(String[] args) {
         Scanner userIn = new Scanner(System.in);
         //System.out.println("Enter top level URL: ");
 

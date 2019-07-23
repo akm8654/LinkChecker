@@ -35,7 +35,6 @@ public class SideConnection {
     private static final boolean DEBUG = true;
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 6.1; WOW64)" +
             " AppleWebKit/535.1 (KHTML, like Gecko) Chrome/13.0.782.112 Safari/535.1";
-
     /**
      * The initial URL is the parent URL
      */
@@ -44,6 +43,7 @@ public class SideConnection {
      * All the links on the page.
      */
     private List<String[]> links = new LinkedList<String[]>();
+
     /**
      * current Webpage
      */
@@ -67,7 +67,7 @@ public class SideConnection {
      * @param initialURL The ultimate 'parent' URL
      * @throws SQLException if there is an issue in the sql code.
      */
-    public SideConnection(String initialURL) throws SQLException {
+    SideConnection(String initialURL) throws SQLException {
         this.initialURL = initialURL;
         this.DB = new Database();
         DB.runSql2("TRUNCATE Record;");
@@ -95,21 +95,19 @@ public class SideConnection {
      * database.
      * @throws SQLException - in case of an SQL error.
      */
-    public Boolean check(String URL, String text) throws SQLException {
+    private Boolean check(String URL, String text) throws SQLException {
         String sql =
-                "SELECT * FROM `record` WHERE `RecordID`=`" + makeID(URL) +
-                        "`;";
+                "SELECT * FROM `record` WHERE `RecordID`='" + makeID(URL) +
+                        "';";
         ResultSet rs = DB.runSql(sql);
         if (rs.next()) {
             return true;
         } else {
             //store the URL so it is not used again.
             sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
-                    "VALUES (`" + makeID(URL) + "`, `" + URL + "`, `" + text + "`);";
-            PreparedStatement stmt = DB.conn.prepareStatement(sql,
-                    Statement.RETURN_GENERATED_KEYS);
-            stmt.setString(1, URL);
-            stmt.execute();
+                    "VALUES ('" + makeID(URL) + "', '" + URL + "', '" + text + "');";
+            Statement stmt = DB.conn.createStatement();
+            stmt.executeUpdate(sql);
             return false;
         }
     }
@@ -133,24 +131,29 @@ public class SideConnection {
         return true;
     }
 
+    private Boolean inTable(String URL){
+        return null;
+    }
+
     /**
      * This sets up the recursive loop through a parent url.
      *
      * @throws SQLException In case the database finds an error.
      */
-    public void findPages() throws SQLException {
+    void findPages() throws SQLException {
         String[] initialURLArray = new String[2];
         initialURLArray[0] = initialURL;
         initialURLArray[1] = "MAIN";
         pagesToVisit.add(initialURLArray);
         String sql;
+        dPrint("First Insert");
+        /**
         sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
-                "VALUES (`" + makeID(initialURL) + "`, `" + initialURL + "`, " +
-                "`" + "MAIN" + "`);";
-         PreparedStatement stmt = DB.conn.prepareStatement(sql,
-         Statement.RETURN_GENERATED_KEYS);
-         stmt.setString(1, initialURL);
-         stmt.execute();
+                "VALUES ('" + makeID(initialURL) + "', '" + initialURL + "', " +
+                "'" + "MAIN" + "');";
+        Statement stmt = DB.conn.createStatement();
+        stmt.executeUpdate(sql);
+         */
         while (!pagesToVisit.isEmpty()) {
             String[] currentURL;
             currentURL = pagesToVisit.remove(0);
@@ -173,11 +176,12 @@ public class SideConnection {
      * @param URL the URL to crawl too
      * @return if it was successful or not.
      */
-    public boolean crawl(String URL) {
+    boolean crawl(String URL) {
         try {
             Connection conn = Jsoup.connect((URL));
             conn.userAgent(USER_AGENT);
             Document htmlDoc = conn.get();
+            dPrint("Crawling: " + URL);
             this.htmlDocument = htmlDoc;
             if (conn.response().statusCode() == 200) // 200 is the HTTP OK status
             // code
@@ -204,7 +208,7 @@ public class SideConnection {
         }
     }
 
-    public List<String[]> getLinks() {
+    private List<String[]> getLinks() {
         return this.links;
     }
 
