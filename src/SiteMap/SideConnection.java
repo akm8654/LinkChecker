@@ -10,8 +10,10 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Set;
 
 
 public class SideConnection {
@@ -48,10 +50,13 @@ public class SideConnection {
     /**
      * The database where everything is added too.
      */
-    public static Database DB = new Database();
+    public static Database DB;
+    private Set<String> pagesVisited = new HashSet<String>();
+    private List<String> pagesToVisit = new LinkedList<String>();
 
     public SideConnection(String initialURL) throws SQLException {
         this.initialURL = initialURL;
+        this.DB = new Database();
         DB.runSql2("TRUNCATE Record;");
     }
 
@@ -84,6 +89,65 @@ public class SideConnection {
         }
     }
 
+    /**
+     * Returns the nextURL to visit, in the order that it was found. It also
+     * checks that it doesn't return an already visited URL.
+     *
+     * @return the nextURL.
+     */
+    private String nextURL() {
+        String nextURL;
+        do {
+            nextURL = this.pagesToVisit.remove(0);
+        } while(this.pagesVisited.contains(nextURL));
+        this.pagesVisited.add(nextURL);
+        return nextURL;
+    }
+
+    /**
+     * Determines if the URL is a 'parent URL' of the code.
+     *
+     * @param urlToCheck the url that is being checked
+     * @param parentURL the original code
+     * @return whether it is a parent or not.
+     */
+    private Boolean isParent(String urlToCheck, String parentURL){
+        if (urlToCheck.length() < parentURL.length()){
+            return false;
+        }
+        for(int i = 0 ; i < parentURL.length(); i++){
+            if (!(urlToCheck.charAt(i) == parentURL.charAt(i))){
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * This sets up the recursive loop through a parent url.
+     *
+     * @throws SQLException In case the database finds an error.
+     */
+    public void findPages() throws SQLException {
+        pagesToVisit.add(initialURL);
+        while (!pagesToVisit.isEmpty()){
+            String currentURL;
+            currentURL = pagesToVisit.remove(0);
+            if (!pagesToVisit.contains(currentURL)) {
+                dPrint("Checking: " + currentURL);
+                if (!check(currentURL)) {
+                    crawl(currentURL);
+                    this.pagesVisited.add(currentURL);
+                    for (String page : getLinks()) {
+                        if (isParent(page, initialURL)) {
+                            pagesToVisit.add(page);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     public boolean crawl(String URL){
         try {
             Connection conn = Jsoup.connect((URL));
@@ -102,6 +166,7 @@ public class SideConnection {
             }
             Elements linksOnPage = htmlDocument.select("a[href]");
             dPrint("Found (" + linksOnPage.size() + ") links");
+            links = new LinkedList<String>();
             for(Element link : linksOnPage)
             {
                 this.links.add(link.absUrl("href"));
