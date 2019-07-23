@@ -80,7 +80,7 @@ public class SideConnection {
      * @param URL - the URL that needs an Id assigned.
      * @return int for value into the storage table.
      */
-    public int makeID(String URL) {
+    private int makeID(String URL) {
         // TODO: MAKE THIS BETTER
         return (URL.hashCode());
     }
@@ -97,22 +97,19 @@ public class SideConnection {
      */
     public Boolean check(String URL, String text) throws SQLException {
         String sql =
-                "SELECT * FROM 'record' WHERE 'RecordID' = '" + makeID(URL) +
-                        "'";
+                "SELECT * FROM `record` WHERE `RecordID`=`" + makeID(URL) +
+                        "`;";
         ResultSet rs = DB.runSql(sql);
         if (rs.next()) {
             return true;
         } else {
             //store the URL so it is not used again.
-            sql =
-                    "INSERT INTO 'crawler'.'record' " + "('URL' VALUES " +
-                            "(");
-            ";
+            sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
+                    "VALUES (`" + makeID(URL) + "`, `" + URL + "`, `" + text + "`);";
             PreparedStatement stmt = DB.conn.prepareStatement(sql,
                     Statement.RETURN_GENERATED_KEYS);
             stmt.setString(1, URL);
             stmt.execute();
-
             return false;
         }
     }
@@ -147,17 +144,17 @@ public class SideConnection {
         initialURLArray[1] = "MAIN";
         pagesToVisit.add(initialURLArray);
         String sql;
-        sql =
-                "INSERT INTO 'Crawler'.'Record' " + "('URL' VALUES " +
-                        "(?);";
-        PreparedStatement stmt = DB.conn.prepareStatement(sql,
-                Statement.RETURN_GENERATED_KEYS);
-        stmt.setString(1, initialURL);
-        stmt.execute();
+        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
+                "VALUES (`" + makeID(initialURL) + "`, `" + initialURL + "`, " +
+                "`" + "MAIN" + "`);";
+         PreparedStatement stmt = DB.conn.prepareStatement(sql,
+         Statement.RETURN_GENERATED_KEYS);
+         stmt.setString(1, initialURL);
+         stmt.execute();
         while (!pagesToVisit.isEmpty()) {
             String[] currentURL;
             currentURL = pagesToVisit.remove(0);
-            dPrint("Checking: " + currentURL);
+            dPrint("Checking: " + currentURL[0]);
             if (!check(currentURL[0], currentURL[1])) {
                 crawl(currentURL[0]);
                 this.pagesVisited.add(currentURL[0]);
@@ -195,7 +192,10 @@ public class SideConnection {
             dPrint("Found (" + linksOnPage.size() + ") links");
             links = new LinkedList<String[]>();
             for (Element link : linksOnPage) {
-                this.links.add(link.absUrl("href"));
+                String[] addedlink = new String[2];
+                addedlink[0] = link.absUrl("href");
+                addedlink[1] = link.text();
+                this.links.add(addedlink);
             }
             return true;
         } catch (IOException ioe) {
