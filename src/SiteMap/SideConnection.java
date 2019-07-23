@@ -15,6 +15,21 @@ import java.util.List;
 
 
 public class SideConnection {
+    /**
+     * Print method that does something only if debug is true.
+     *
+     * @param logMsg the message to log
+     */
+    private static void dPrint(Object logMsg) {
+        if (DEBUG){
+            System.out.println(logMsg);
+        }
+    }
+
+    /**
+     * Turned on if standard output debug message is desired.
+     */
+    private static final boolean DEBUG = true;
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 6.1; WOW64)" +
             " AppleWebKit/535.1 (KHTML, like Gecko) Chrome/13.0.782.112 Safari/535.1";
 
@@ -78,15 +93,15 @@ public class SideConnection {
             if(conn.response().statusCode() == 200) // 200 is the HTTP OK status
                 // code
             {
-                System.out.println("\n**Visiting** Received web page at " + URL);
+                dPrint("\n**Visiting** Received web page at " + URL);
             }
             if(!conn.response().contentType().contains("text/html"))
             {
-                System.out.println("**Failure** Retrieved something other than HTML");
+                dPrint("**Failure** Retrieved something other than HTML");
                 return false;
             }
             Elements linksOnPage = htmlDocument.select("a[href]");
-            System.out.println("Found (" + linksOnPage.size() + ") links");
+            dPrint("Found (" + linksOnPage.size() + ") links");
             for(Element link : linksOnPage)
             {
                 this.links.add(link.absUrl("href"));
