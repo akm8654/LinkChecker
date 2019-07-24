@@ -7,7 +7,6 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.io.IOException;
-import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -33,6 +32,10 @@ public class SideConnection {
      * Turned on if standard output debug message is desired.
      */
     private static final boolean DEBUG = true;
+    /**
+     * The User agent used to connect to the web as if it was a person and
+     * not a robot.
+     */
     private static final String USER_AGENT = "Mozilla/5.0 (Windows NT 6.1; WOW64)" +
             " AppleWebKit/535.1 (KHTML, like Gecko) Chrome/13.0.782.112 Safari/535.1";
     /**
@@ -53,13 +56,9 @@ public class SideConnection {
      */
     public static Database DB;
     /**
-     * Determines the pages that are visited.
+     * Holds all the pages that need to be visited.
      */
-    private Set<String> pagesVisited = new HashSet<String>();
-    /**
-     * Holds all the pages that still need to be visited.
-     */
-    private List<String[]> pagesToVisit = new LinkedList<String[]>();
+    private Set<String[]> pagestoVisit = new HashSet<>();
 
     /**
      * Constructor for the side connection.
@@ -113,29 +112,53 @@ public class SideConnection {
     }
 
     /**
-     * Creates a page for the website, where the top value is the parentURL
-     * and text.
+     * Determines if the page has been visited yet or not.
      *
-     * @param URL the url for the page
+     * @param URL the URL to be checked
+     * @return whether or not it is present in the table
+     * @throws SQLException in case of an SQL Error
+     */
+    private Boolean presentInChecked(String URL) throws SQLException {
+        String sql =
+                "SELECT * FROM `record` WHERE `RecordID`='" + makeID(URL) +
+                        "';";
+        ResultSet rs = DB.runSql(sql);
+        if (rs.next()) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Creates a page for the website, with columns, RecordID, URL,
+     * parentLink as a boolean, if it is a parent then the value is true,
+     * else false.
+     *
+     * @param URL  the url for the page
      * @param text the text for the page
      * @throws SQLException in case SQL doesn't work.
      */
     private void createPageTable(String URL, String text, String parentURL,
-                                 String parentTxt) throws SQLException{
-        String sql = "CREATE TABLE `crawler`.`" + text +"` ( `PageTitle` TEXT" +
-                " NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ) ENGINE = MyISAM;";
+                                 String parentTxt) throws SQLException {
+        String sql = "CREATE TABLE `crawler`.`" + text + "` ( `PageTitle` " +
+                "TEXT NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ," +
+                " `ParentLink` BOOLEAN NOT NULL DEFAULT FALSE ) ENGINE = " +
+                "MyISAM;";
         Statement stmt = DB.conn.createStatement();
         stmt.executeUpdate(sql);
 
-        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
+        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`, " +
+                "`ParentLink`) " +
                 "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '" + parentTxt +
-                "');";
+                "', 'TRUE');";
         stmt.executeUpdate(sql);
 
         sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
                 "VALUES ('" + makeID(URL) + "', '" + URL + "', '" + text + "');";
         stmt.executeUpdate(sql);
     }
+
 
     /**
      * Determines if the URL is a 'parent URL' of the code.
@@ -156,10 +179,6 @@ public class SideConnection {
         return true;
     }
 
-    private Boolean inTable(String URL){
-        return null;
-    }
-
     /**
      * This sets up the recursive loop through a parent url.
      *
@@ -173,11 +192,11 @@ public class SideConnection {
         String sql;
         dPrint("First Insert");
         /**
-        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
-                "VALUES ('" + makeID(initialURL) + "', '" + initialURL + "', " +
-                "'" + "MAIN" + "');";
-        Statement stmt = DB.conn.createStatement();
-        stmt.executeUpdate(sql);
+         sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
+         "VALUES ('" + makeID(initialURL) + "', '" + initialURL + "', " +
+         "'" + "MAIN" + "');";
+         Statement stmt = DB.conn.createStatement();
+         stmt.executeUpdate(sql);
          */
         while (!pagesToVisit.isEmpty()) {
             String[] currentURL;
@@ -192,6 +211,63 @@ public class SideConnection {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Determines if the table exists or not.
+     * @param text the table name
+     * @return true if exists, false if not.
+     * @throws SQLException if there is an SQL Error.
+     */
+    Boolean checkPageTable(String text) throws SQLException {
+        String sql = "SELECT * FROM information_schema WHERE TABLE_NAME = " +
+                text;
+        ResultSet rs = DB.runSql(sql);
+        if (rs.next()) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    void visitPage(String[] currentlink) {
+        try {
+            String URL = currentlink[0];
+            String text = currentlink[1];
+            String parentURL = currentlink[2];
+
+            Connection conn = Jsoup.connect(currentlink[0]);
+            conn.userAgent(USER_AGENT);
+            Document htmlDoc = conn.get();
+            dPrint("Visiting Page: " + URL);
+            this.htmlDocument = htmlDoc;
+
+            if (conn.response().statusCode() == 200) {
+                dPrint("Webpage Received");
+                if (!checkPageTable(text)){
+                    createPageTable(URL, text, parentURL,);
+                }
+                Elements linksOnPage = htmlDocument.select("a[href");
+                dPrint("Found (" + linksOnPage.size() + ") on page.");
+                links = new LinkedList<String[]>();
+                for (Element link : linksOnPage) {
+                    String[] checkedLink = new String[4];
+                    checkedLink[0] = link.absUrl("href");
+                    checkedLink[1] = link.text();
+                    checkedLink[2] = URL;
+                    checkedLink[3] = text;
+                    if (!presentInChecked(checkedLink[0])){
+                        pagestoVisit.add(checkedLink);
+                    }
+                }
+            } else {
+                //TODO: ADD TO BROKEN LINK DATABASE
+            }
+        } catch (IOException e) {
+            //TODO: Another failure
+        } catch (SQLException sqlE){
+            //TODO: HANDLE ALL THE THINGS
         }
     }
 
