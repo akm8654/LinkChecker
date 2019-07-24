@@ -113,6 +113,31 @@ public class SideConnection {
     }
 
     /**
+     * Creates a page for the website, where the top value is the parentURL
+     * and text.
+     *
+     * @param URL the url for the page
+     * @param text the text for the page
+     * @throws SQLException in case SQL doesn't work.
+     */
+    private void createPageTable(String URL, String text, String parentURL,
+                                 String parentTxt) throws SQLException{
+        String sql = "CREATE TABLE `crawler`.`" + text +"` ( `PageTitle` TEXT" +
+                " NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ) ENGINE = MyISAM;";
+        Statement stmt = DB.conn.createStatement();
+        stmt.executeUpdate(sql);
+
+        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
+                "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '" + parentTxt +
+                "');";
+        stmt.executeUpdate(sql);
+
+        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
+                "VALUES ('" + makeID(URL) + "', '" + URL + "', '" + text + "');";
+        stmt.executeUpdate(sql);
+    }
+
+    /**
      * Determines if the URL is a 'parent URL' of the code.
      *
      * @param urlToCheck the url that is being checked
