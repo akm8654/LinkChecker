@@ -52,6 +52,10 @@ public class SideConnection {
      */
     private Document htmlDocument;
     /**
+     * Current PageTitle
+     */
+    private String pageTitle;
+    /**
      * The database where everything is added too.
      */
     public static Database DB;
@@ -66,10 +70,22 @@ public class SideConnection {
      * @param initialURL The ultimate 'parent' URL
      * @throws SQLException if there is an issue in the sql code.
      */
-    SideConnection(String initialURL) throws SQLException {
+    SideConnection(String initialURL) throws SQLException, IOException {
         this.initialURL = initialURL;
+        Connection conn = Jsoup.connect(initialURL);
+        conn.userAgent(USER_AGENT);
+        Document htmlDoc = conn.get();
+        dPrint("Visiting Initial Page: " + initialURL);
+        this.htmlDocument = htmlDoc;
+        setTitle();
         this.DB = new Database();
         DB.runSql2("TRUNCATE Record;");
+    }
+
+    private void setTitle(){
+        this.pageTitle = this.htmlDocument.title();
+        String[] titles = this.pageTitle.split("|");
+        this.pageTitle = titles[0];
     }
 
     /**
@@ -80,7 +96,6 @@ public class SideConnection {
      * @return int for value into the storage table.
      */
     private int makeID(String URL) {
-        // TODO: MAKE THIS BETTER
         return (URL.hashCode());
     }
 
@@ -179,6 +194,12 @@ public class SideConnection {
         return true;
     }
 
+    void beginCrawl() throws SQLException {
+        String[] initialURLArray = new String[4];
+        initialURLArray[0] = initialURL;
+        initialURLArray[1] = pageTitle;
+    }
+
     /**
      * This sets up the recursive loop through a parent url.
      *
@@ -216,6 +237,7 @@ public class SideConnection {
 
     /**
      * Determines if the table exists or not.
+     *
      * @param text the table name
      * @return true if exists, false if not.
      * @throws SQLException if there is an SQL Error.
@@ -231,87 +253,123 @@ public class SideConnection {
         }
     }
 
+    /**
+     * submits the links to the original table.
+     *
+     * @param tableName
+     * @param linkToSubmit
+     * @throws SQLException
+     */
+    private void submitToPageTable(String tableName, String[] linkToSubmit)
+            throws SQLException {
+        String sql;
+        Statement stmt = DB.conn.createStatement();
+
+        sql = "INSERT INTO `" + tableName + "` (`RecordID`, `URL`, `Page " +
+                "Title`,) " + "VALUES ('" + makeID(linkToSubmit[0]) +
+                "', " +
+                "'" + linkToSubmit[0] + "', '" + linkToSubmit[1] +
+                "');";
+        stmt.executeUpdate(sql);
+    }
+
+    /**
+     * Adds the given link as a parent to the page's table. If not present
+     * then it prints it.
+     *
+     * @param tableName  the name of the table to update
+     * @param updateLink the string of values to change
+     * @throws SQLException If there is an SQL Error.
+     */
+    private void addParent(String tableName, String[] updateLink) throws SQLException {
+        String parentURL = updateLink[2];
+        String parentTxt = updateLink[3];
+
+        Statement stmt = DB.conn.createStatement();
+
+        String sql =
+                "SELECT * FROM `" + tableName + "` WHERE `RecordID`='" + makeID(parentURL) +
+                        "';";
+        ResultSet rs = DB.runSql(sql);
+        if (!rs.next()) {
+            //insert the URL into the table.
+            sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`, " +
+                    "`ParentLink`) " +
+                    "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '"
+                    + parentTxt + "', 'TRUE');";
+            stmt.executeUpdate(sql);
+        } else {
+            dPrint("UNOPTIMIZED CODE: ATTEMPTING TO ADD ALREADY PRESENT " +
+                    "PARENT");
+        }
+    }
+
+    /**
+     * Adds the specified link to the broken table.
+     *
+     * @param linkToAdd the link to add.
+     * @throws SQLException If there is an SQL Error
+     */
+    private void addBrokenLink(String[] linkToAdd) throws SQLException {
+        Statement stmt = DB.conn.createStatement();
+        String URL = linkToAdd[0];
+        String text = linkToAdd[1];
+        String parentURL = linkToAdd[2];
+        String sql = "INSERT INTO `broken` (`RecordID`, `Page Title`, `URL`, " +
+                "`On Page URL`) VALUES " +
+                "('" + makeID(URL) + "', '" + text + "', '" + URL + "', '" +
+                parentURL + "')";
+    }
+
+    /**
+     * The code that visits the page requested, determining if it needs to
+     * access the table and more.
+     *
+     * @param currentlink - the link to visit.
+     */
     void visitPage(String[] currentlink) {
         try {
             String URL = currentlink[0];
             String text = currentlink[1];
             String parentURL = currentlink[2];
+            String parentText = currentlink[3];
 
             Connection conn = Jsoup.connect(currentlink[0]);
             conn.userAgent(USER_AGENT);
             Document htmlDoc = conn.get();
             dPrint("Visiting Page: " + URL);
             this.htmlDocument = htmlDoc;
+            setTitle();
 
             if (conn.response().statusCode() == 200) {
-                dPrint("Webpage Received");
-                if (!checkPageTable(text)){
-                    createPageTable(URL, text, parentURL,);
-                }
-                Elements linksOnPage = htmlDocument.select("a[href");
-                dPrint("Found (" + linksOnPage.size() + ") on page.");
-                links = new LinkedList<String[]>();
-                for (Element link : linksOnPage) {
-                    String[] checkedLink = new String[4];
-                    checkedLink[0] = link.absUrl("href");
-                    checkedLink[1] = link.text();
-                    checkedLink[2] = URL;
-                    checkedLink[3] = text;
-                    if (!presentInChecked(checkedLink[0])){
-                        pagestoVisit.add(checkedLink);
+                dPrint("Web Page Received");
+                if (!checkPageTable(this.pageTitle)) {
+                    createPageTable(URL, this.pageTitle, parentURL, parentText);
+                    Elements linksOnPage = htmlDocument.select("a[href");
+                    dPrint("Found (" + linksOnPage.size() + ") on page.");
+                    links = new LinkedList<String[]>();
+                    for (Element link : linksOnPage) {
+                        String[] checkedLink = new String[4];
+                        checkedLink[0] = link.absUrl("href");
+                        checkedLink[1] = link.text();
+                        checkedLink[2] = URL;
+                        checkedLink[3] = text;
+                        if (!presentInChecked(checkedLink[0])) {
+                            pagestoVisit.add(checkedLink);
+                        }
+                        submitToPageTable(text, checkedLink);
                     }
+                } else {
+                    dPrint("TABLE ALREADY CREATED");
+                    addParent(text, currentlink);
                 }
             } else {
-                //TODO: ADD TO BROKEN LINK DATABASE
+                addBrokenLink(currentlink);
             }
         } catch (IOException e) {
             //TODO: Another failure
-        } catch (SQLException sqlE){
+        } catch (SQLException sqlE) {
             //TODO: HANDLE ALL THE THINGS
         }
     }
-
-    /**
-     * the thing that crawls along the website, finds links and names.
-     *
-     * @param URL the URL to crawl too
-     * @return if it was successful or not.
-     */
-    boolean crawl(String URL) {
-        try {
-            Connection conn = Jsoup.connect((URL));
-            conn.userAgent(USER_AGENT);
-            Document htmlDoc = conn.get();
-            dPrint("Crawling: " + URL);
-            this.htmlDocument = htmlDoc;
-            if (conn.response().statusCode() == 200) // 200 is the HTTP OK status
-            // code
-            {
-                dPrint("\n**Visiting** Received web page at " + URL);
-            }
-            if (!conn.response().contentType().contains("text/html")) {
-                dPrint("**Failure** Retrieved something other than HTML");
-                return false;
-            }
-            Elements linksOnPage = htmlDocument.select("a[href]");
-            dPrint("Found (" + linksOnPage.size() + ") links");
-            links = new LinkedList<String[]>();
-            for (Element link : linksOnPage) {
-                String[] addedlink = new String[2];
-                addedlink[0] = link.absUrl("href");
-                addedlink[1] = link.text();
-                this.links.add(addedlink);
-            }
-            return true;
-        } catch (IOException ioe) {
-            // We were not successful in our HTTP request
-            return false;
-        }
-    }
-
-    private List<String[]> getLinks() {
-        return this.links;
-    }
-
-
 }
