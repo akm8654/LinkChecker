@@ -63,6 +63,7 @@ public class SideConnection {
      * Holds all the pages that need to be visited.
      */
     private Set<String[]> pagestoVisit = new HashSet<>();
+    private List<String[]> pagestoVisitQueue = new LinkedList<>();
 
     /**
      * Constructor for the side connection.
@@ -84,8 +85,12 @@ public class SideConnection {
 
     private void setTitle(){
         this.pageTitle = this.htmlDocument.title();
-        String[] titles = this.pageTitle.split("|");
+        String[] titles = this.pageTitle.split("\\|");
         this.pageTitle = titles[0];
+        this.pageTitle = this.pageTitle.replaceAll("'", "");
+        this.pageTitle = this.pageTitle.replaceAll(" ", "");
+        this.pageTitle = this.pageTitle.toLowerCase();
+        dPrint(pageTitle);
     }
 
     /**
@@ -156,20 +161,20 @@ public class SideConnection {
      */
     private void createPageTable(String URL, String text, String parentURL,
                                  String parentTxt) throws SQLException {
-        String sql = "CREATE TABLE `crawler`.`" + text + "` ( `PageTitle` " +
+        String sql = "CREATE TABLE `individual names`.`" + text + "` ( `PageTitle` " +
                 "TEXT NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ," +
                 " `ParentLink` BOOLEAN NOT NULL DEFAULT FALSE ) ENGINE = " +
                 "MyISAM;";
         Statement stmt = DB.conn.createStatement();
         stmt.executeUpdate(sql);
 
-        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`, " +
+        sql = "INSERT INTO `"+text+"` (`RecordID`, `URL`, `Page Title`, " +
                 "`ParentLink`) " +
                 "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '" + parentTxt +
-                "', 'TRUE');";
+                "', '1');";
         stmt.executeUpdate(sql);
 
-        sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
+        sql = "INSERT INTO `"+text+"` (`RecordID`, `URL`, `Page Title`) " +
                 "VALUES ('" + makeID(URL) + "', '" + URL + "', '" + text + "');";
         stmt.executeUpdate(sql);
     }
@@ -194,44 +199,25 @@ public class SideConnection {
         return true;
     }
 
+    /**
+     * Starts the crawl and recursively looks through websites.
+     *
+     * @throws SQLException - sometimes things go wrong.
+     */
     void beginCrawl() throws SQLException {
         String[] initialURLArray = new String[4];
         initialURLArray[0] = initialURL;
         initialURLArray[1] = pageTitle;
-    }
-
-    /**
-     * This sets up the recursive loop through a parent url.
-     *
-     * @throws SQLException In case the database finds an error.
-     */
-    void findPages() throws SQLException {
-        String[] initialURLArray = new String[2];
-        initialURLArray[0] = initialURL;
-        initialURLArray[1] = "MAIN";
-        pagesToVisit.add(initialURLArray);
-        String sql;
-        dPrint("First Insert");
-        /**
-         sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`) " +
-         "VALUES ('" + makeID(initialURL) + "', '" + initialURL + "', " +
-         "'" + "MAIN" + "');";
-         Statement stmt = DB.conn.createStatement();
-         stmt.executeUpdate(sql);
-         */
-        while (!pagesToVisit.isEmpty()) {
+        initialURLArray[2] = initialURL;
+        initialURLArray[3] = pageTitle;
+        pagestoVisit.add(initialURLArray);
+        pagestoVisitQueue.add(initialURLArray);
+        while(pagestoVisit.size() != 0){
             String[] currentURL;
-            currentURL = pagesToVisit.remove(0);
+            currentURL = pagestoVisitQueue.remove(0);
+            pagestoVisit.remove(currentURL);
             dPrint("Checking: " + currentURL[0]);
-            if (!check(currentURL[0], currentURL[1])) {
-                crawl(currentURL[0]);
-                this.pagesVisited.add(currentURL[0]);
-                for (String[] page : getLinks()) {
-                    if (isParent(page[0], initialURL)) {
-                        pagesToVisit.add(page);
-                    }
-                }
-            }
+            visitPage(currentURL);
         }
     }
 
@@ -243,8 +229,8 @@ public class SideConnection {
      * @throws SQLException if there is an SQL Error.
      */
     Boolean checkPageTable(String text) throws SQLException {
-        String sql = "SELECT * FROM information_schema WHERE TABLE_NAME = " +
-                text;
+        String sql = "SELECT * FROM `information_schema`.`tables` WHERE " +
+                "TABLE_NAME='"+text+"';";
         ResultSet rs = DB.runSql(sql);
         if (rs.next()) {
             return true;
@@ -296,7 +282,7 @@ public class SideConnection {
             sql = "INSERT INTO `record` (`RecordID`, `URL`, `Page Title`, " +
                     "`ParentLink`) " +
                     "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '"
-                    + parentTxt + "', 'TRUE');";
+                    + parentTxt + "', '1');";
             stmt.executeUpdate(sql);
         } else {
             dPrint("UNOPTIMIZED CODE: ATTEMPTING TO ADD ALREADY PRESENT " +
@@ -344,10 +330,10 @@ public class SideConnection {
             if (conn.response().statusCode() == 200) {
                 dPrint("Web Page Received");
                 if (!checkPageTable(this.pageTitle)) {
+                    dPrint("Creating page table, and looking for links");
                     createPageTable(URL, this.pageTitle, parentURL, parentText);
                     Elements linksOnPage = htmlDocument.select("a[href");
                     dPrint("Found (" + linksOnPage.size() + ") on page.");
-                    links = new LinkedList<String[]>();
                     for (Element link : linksOnPage) {
                         String[] checkedLink = new String[4];
                         checkedLink[0] = link.absUrl("href");
@@ -359,10 +345,12 @@ public class SideConnection {
                         }
                         submitToPageTable(text, checkedLink);
                     }
+                    check(URL, text);
                 } else {
                     dPrint("TABLE ALREADY CREATED");
                     addParent(text, currentlink);
                 }
+                pagestoVisitQueue.addAll(pagestoVisit);
             } else {
                 addBrokenLink(currentlink);
             }
