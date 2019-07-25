@@ -188,7 +188,8 @@ public class SideConnection {
                                  String parentTxt) throws SQLException {
         String sql = "CREATE TABLE `individual names`.`" + text + "` ( `PageTitle` " +
                 "TEXT NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ," +
-                " `ParentLink` BOOLEAN NOT NULL DEFAULT FALSE ) ENGINE = " +
+                " `ParentLink` " +
+                "BOOLEAN NOT NULL DEFAULT FALSE ) ENGINE = " +
                 "MyISAM;";
         Statement stmt = DB.conn.createStatement();
         stmt.executeUpdate(sql);
@@ -197,6 +198,8 @@ public class SideConnection {
                 "`ParentLink`) " +
                 "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '" + parentTxt +
                 "', '1');";
+        stmt.executeUpdate(sql);
+        sql = "ALTER TABLE `individual names`.`" + text + "` COMMENT = '" + URL + "';";
         stmt.executeUpdate(sql);
     }
 
@@ -250,21 +253,23 @@ public class SideConnection {
      * Determines if the table exists or not.
      *
      * @param text the table name
+     * @param URL the url of the top link
      * @return true if exists, false if not.
      * @throws SQLException if there is an SQL Error.
      */
-    Boolean checkPageTable(String text) throws SQLException {
+    int checkPageTable(String text, String URL) throws SQLException {
         text = text.toUpperCase();
         dPrint("Checking for the table " + text);
         DatabaseMetaData md = DB.conn.getMetaData();
         ResultSet rs = md.getTables("INDIVIDUAL NAMES", null, text, null);
-        if (rs.next()) {
-            dPrint("Table Found");
-            return true;
-        } else {
-            dPrint("Table Not Found");
-            return false;
+        while (rs.next()) {
+            if (URL.equals(rs.getString("REMARKS"))) {
+                return 1;
+            } else {
+                return 2;
+            }
         }
+        return 0;
     }
 
     /**
@@ -365,6 +370,7 @@ public class SideConnection {
             String text = currentlink[1];
             String parentURL = currentlink[2];
             String parentText = currentlink[3];
+            text = fixName(text);
 
             Connection conn = Jsoup.connect(currentlink[0]);
             conn.userAgent(USER_AGENT);
@@ -375,12 +381,21 @@ public class SideConnection {
 
             if (conn.response().statusCode() == 200) {
                 dPrint("Web Page Received, checking table " + this.pageTitle);
-                if (!checkPageTable(this.pageTitle)) {
+                int pageCheck = checkPageTable(this.pageTitle, URL);
+                if (pageCheck == 0) {
                     dPrint("Creating page table, and looking for links");
                     createPageTable(URL, this.pageTitle, parentURL, parentText);
-                } else {
-                    dPrint("TABLE ALREADY CREATED");
+                } else if (pageCheck == 1) {
+                    dPrint("Table created already, needs to add parent.");
                     addParent(this.pageTitle, currentlink);
+                } else {
+                    String newTitle = this.pageTitle + text;
+                    pageCheck = checkPageTable(newTitle, URL);
+                    if (pageCheck == 1) {
+                        addParent(newTitle, currentlink);
+                    } else {
+                        createPageTable(URL, newTitle, parentURL, parentText);
+                    }
                 }
                 Elements linksOnPage = this.htmlDocument.select("a[href]");
                 dPrint("Found (" + linksOnPage.size() + ") on page.");
