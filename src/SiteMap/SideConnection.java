@@ -64,6 +64,7 @@ public class SideConnection {
      * Holds all the pages that need to be visited.
      */
     private Set<String[]> pagestoVisit = new HashSet<>();
+    private Set<String[]> pagesVisited = new HashSet<>();
     private List<String[]> pagestoVisitQueue = new LinkedList<>();
 
     /**
@@ -72,7 +73,7 @@ public class SideConnection {
      * @param initialURL The ultimate 'parent' URL
      * @throws SQLException if there is an issue in the sql code.
      */
-    SideConnection(String initialURL) throws SQLException, IOException {
+    public SideConnection(String initialURL) throws SQLException, IOException {
         this.initialURL = initialURL;
         Connection conn = Jsoup.connect(initialURL);
         conn.userAgent(USER_AGENT);
@@ -81,7 +82,8 @@ public class SideConnection {
         this.htmlDocument = htmlDoc;
         setTitle();
         this.DB = new Database();
-        DB.runSql2("TRUNCATE Record;");
+        //Use if you want to reset the values.
+        //DB.runSql2("TRUNCATE Record;");
     }
 
     /**
@@ -160,7 +162,7 @@ public class SideConnection {
      * @return whether or not it is present in the table
      * @throws SQLException in case of an SQL Error
      */
-    private Boolean presentInChecked(String URL) throws SQLException {
+    public Boolean presentInChecked(String URL) throws SQLException {
         String sql =
                 "SELECT * FROM `record` WHERE `RecordID`='" + makeID(URL) +
                         "';";
@@ -187,6 +189,7 @@ public class SideConnection {
     private void createPageTable(String URL, String text, String parentURL,
                                  String parentTxt) throws SQLException {
         dPrint("Creating table named " + text);
+
         String sql = "CREATE TABLE `individual names`.`" + text + "` ( `PageTitle` " +
                 "TEXT NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ," +
                 " `ParentLink` " +
@@ -200,7 +203,9 @@ public class SideConnection {
                 "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '" + parentTxt +
                 "', '1');";
         stmt.executeUpdate(sql);
-        sql = "ALTER TABLE `individual names`.`" + text + "` COMMENT = '" + URL + "';";
+
+        sql = "INSERT INTO `crawler`.`pagetables` (`tableName`, `tableURL`) " +
+                "VALUE ('" + text + "', '" + URL + "');";
         stmt.executeUpdate(sql);
     }
 
@@ -237,10 +242,11 @@ public class SideConnection {
         initialURLArray[3] = this.pageTitle;
         this.pagestoVisit.add(initialURLArray);
         this.pagestoVisitQueue.add(initialURLArray);
-        while (pagestoVisit.size() != 0) {
+        while (pagestoVisitQueue.size() != 0) {
             String[] currentURL;
             currentURL = this.pagestoVisitQueue.remove(0);
             this.pagestoVisit.remove(currentURL);
+            dPrint(pagestoVisitQueue.size());
             if (isParent(currentURL[0], initialURL)) {
                 dPrint("Checking: " + currentURL[0]);
                 visitPage(currentURL);
@@ -261,14 +267,14 @@ public class SideConnection {
     int checkPageTable(String text, String URL) throws SQLException {
         text = text.toUpperCase();
         dPrint("Checking for the table " + text);
-        DatabaseMetaData md = DB.conn.getMetaData();
-        ResultSet rs = md.getTables("INDIVIDUAL NAMES", null, text, null);
+        String sql = "SELECT * FROM `crawler`.`pagetables` WHERE " +
+                "`tablename`='" + text + "';";
+        ResultSet rs = DB.runSql(sql);
         boolean looped = false;
         while (rs.next()) {
             looped = true;
             dPrint(URL);
-            dPrint(rs.getString("REMARKS"));
-            if (URL.equals(rs.getString("REMARKS"))) {
+            if (URL.equals(rs.getString("tableURL"))) {
                 dPrint("EXIST: YES");
                 return 1;
             }
@@ -451,13 +457,14 @@ public class SideConnection {
                                 dPrint("Adding to pagesToVisit");
                             }
                         }
-                        this.submitToPageTable(tableTitle, checkedLink);
                     }
+                    this.submitToPageTable(tableTitle, checkedLink);
                 }
                 this.pagestoVisitQueue.addAll(pagestoVisit);
             } else {
                 this.addBrokenLink(currentlink);
             }
+            this.pagesVisited.add(currentlink);
         } catch (IOException e) {
             e.printStackTrace();
         } catch (SQLException sqlE) {
