@@ -263,14 +263,23 @@ public class SideConnection {
         dPrint("Checking for the table " + text);
         DatabaseMetaData md = DB.conn.getMetaData();
         ResultSet rs = md.getTables("INDIVIDUAL NAMES", null, text, null);
+        boolean looped = false;
         while (rs.next()) {
+            looped = true;
+            dPrint(URL);
+            dPrint(rs.getString("REMARKS"));
             if (URL.equals(rs.getString("REMARKS"))) {
+                dPrint("EXIST: YES");
                 return 1;
-            } else {
-                return 2;
             }
         }
-        return 0;
+        if (!looped) {
+            dPrint("EXIST: NO");
+            return 0;
+        } else {
+            dPrint("EXIST: YES_DIF");
+            return 2;
+        }
     }
 
     /**
@@ -412,15 +421,16 @@ public class SideConnection {
                         int i = 1;
                         String newTitle2;
                         while (true) {
-                            newTitle2 = newTitle + String.valueOf(i);
+                            newTitle2 = newTitle + i;
                             pageCheck = checkPageTable(newTitle2, URL);
                             if (pageCheck == 1) {
                                 addParent(newTitle, currentlink);
                                 tableTitle = newTitle;
                                 break;
                             } else if (pageCheck == 0) {
-                                tableTitle = newTitle;
-                                createPageTable(URL, newTitle, parentURL, parentText);
+                                tableTitle = newTitle2;
+                                createPageTable(URL, tableTitle, parentURL,
+                                        parentText);
                                 break;
                             }
                         }
