@@ -138,7 +138,7 @@ public class SideConnection {
      */
     private Boolean check(String URL, String text) throws SQLException {
         String sql =
-                "SELECT * FROM `record` WHERE `RecordID`='" + makeID(URL) +
+                "SELECT * FROM `crawler`.`record` WHERE `RecordID`='" + makeID(URL) +
                         "';";
         ResultSet rs = DB.runSql(sql);
         if (rs.next()) {
@@ -186,6 +186,7 @@ public class SideConnection {
      */
     private void createPageTable(String URL, String text, String parentURL,
                                  String parentTxt) throws SQLException {
+        dPrint("Creating table named " + text);
         String sql = "CREATE TABLE `individual names`.`" + text + "` ( `PageTitle` " +
                 "TEXT NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ," +
                 " `ParentLink` " +
@@ -287,13 +288,18 @@ public class SideConnection {
         String text = linkToSubmit[1];
 
         Statement stmt = DB.conn.createStatement();
-
-        dPrint("submitting to page " + tableName);
-        sql = "INSERT INTO `individual names`.`" + tableName + "` (`PageTitle`, " +
-                "`RecordID`, " + "`URL`, " + "`ParentLink`) VALUES ('" + text + "', '"
-                + makeID(URL) + "', '" + URL + "'," + " '0');";
-        dPrint(sql);
-        stmt.executeUpdate(sql);
+        sql =
+                "SELECT * FROM `record` WHERE `RecordID`='" + makeID(URL) +
+                        "';";
+        ResultSet rs = DB.runSql(sql);
+        if (rs.next()) {
+        } else {
+            dPrint("submitting to page " + tableName);
+            sql = "INSERT INTO `individual names`.`" + tableName + "` (`PageTitle`, " +
+                    "`RecordID`, " + "`URL`, " + "`ParentLink`) VALUES ('" + text + "', '"
+                    + makeID(URL) + "', '" + URL + "'," + " '0');";
+            stmt.executeUpdate(sql);
+        }
     }
 
     /**
@@ -379,22 +385,45 @@ public class SideConnection {
             this.htmlDocument = htmlDoc;
             setTitle();
 
+            String tableTitle;
+
             if (conn.response().statusCode() == 200) {
+                check(URL, text);
                 dPrint("Web Page Received, checking table " + this.pageTitle);
                 int pageCheck = checkPageTable(this.pageTitle, URL);
                 if (pageCheck == 0) {
                     dPrint("Creating page table, and looking for links");
+                    tableTitle = this.pageTitle;
                     createPageTable(URL, this.pageTitle, parentURL, parentText);
                 } else if (pageCheck == 1) {
                     dPrint("Table created already, needs to add parent.");
+                    tableTitle = this.pageTitle;
                     addParent(this.pageTitle, currentlink);
                 } else {
                     String newTitle = this.pageTitle + text;
                     pageCheck = checkPageTable(newTitle, URL);
                     if (pageCheck == 1) {
                         addParent(newTitle, currentlink);
-                    } else {
+                        tableTitle = newTitle;
+                    } else if (pageCheck == 0) {
+                        tableTitle = newTitle;
                         createPageTable(URL, newTitle, parentURL, parentText);
+                    } else {
+                        int i = 1;
+                        String newTitle2;
+                        while (true) {
+                            newTitle2 = newTitle + String.valueOf(i);
+                            pageCheck = checkPageTable(newTitle2, URL);
+                            if (pageCheck == 1) {
+                                addParent(newTitle, currentlink);
+                                tableTitle = newTitle;
+                                break;
+                            } else if (pageCheck == 0) {
+                                tableTitle = newTitle;
+                                createPageTable(URL, newTitle, parentURL, parentText);
+                                break;
+                            }
+                        }
                     }
                 }
                 Elements linksOnPage = this.htmlDocument.select("a[href]");
@@ -407,13 +436,14 @@ public class SideConnection {
                     checkedLink[3] = text;
                     if (isParent(checkedLink[0], initialURL)) {
                         if (!presentInChecked(checkedLink[0])) {
-                            this.pagestoVisit.add(checkedLink);
-                            dPrint("ADDING TO pagesToVisit");
+                            if (!pagestoVisit.contains(checkedLink)) {
+                                this.pagestoVisit.add(checkedLink);
+                                dPrint("Adding to pagesToVisit");
+                            }
                         }
-                        this.submitToPageTable(text, checkedLink);
+                        this.submitToPageTable(tableTitle, checkedLink);
                     }
                 }
-                this.check(URL, text);
                 this.pagestoVisitQueue.addAll(pagestoVisit);
             } else {
                 this.addBrokenLink(currentlink);
