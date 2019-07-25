@@ -165,7 +165,7 @@ public class SideConnection {
                 "SELECT * FROM `record` WHERE `RecordID`='" + makeID(URL) +
                         "';";
         ResultSet rs = DB.runSql(sql);
-        dPrint("Checking if" + URL + " has been visited");
+        dPrint("Checking if " + URL + " has been visited");
         if (rs.next()) {
             dPrint("Returning True");
             return true;
@@ -193,14 +193,10 @@ public class SideConnection {
         Statement stmt = DB.conn.createStatement();
         stmt.executeUpdate(sql);
 
-        sql = "INSERT INTO `individual names`.`" + text + "` (`RecordID`, `URL`, `Page Title`, " +
+        sql = "INSERT INTO `individual names`.`" + text + "` (`RecordID`, `URL`, `PageTitle`, " +
                 "`ParentLink`) " +
                 "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '" + parentTxt +
                 "', '1');";
-        stmt.executeUpdate(sql);
-
-        sql = "INSERT INTO `individual names`.`" + text + "` (`RecordID`, `URL`, `Page Title`) " +
-                "VALUES ('" + makeID(URL) + "', '" + URL + "', '" + text + "');";
         stmt.executeUpdate(sql);
     }
 
@@ -217,7 +213,7 @@ public class SideConnection {
             return false;
         }
         for (int i = 0; i < parentURL.length(); i++) {
-            if (!(urlToCheck.charAt(i) == parentURL.charAt(i))) {
+            if ((urlToCheck.charAt(i) != parentURL.charAt(i))) {
                 return false;
             }
         }
@@ -241,8 +237,12 @@ public class SideConnection {
             String[] currentURL;
             currentURL = this.pagestoVisitQueue.remove(0);
             this.pagestoVisit.remove(currentURL);
-            dPrint("Checking: " + currentURL[0]);
-            visitPage(currentURL);
+            if (isParent(currentURL[0], initialURL)) {
+                dPrint("Checking: " + currentURL[0]);
+                visitPage(currentURL);
+            } else {
+                dPrint("URL is not a parent, checking the next one.");
+            }
         }
     }
 
@@ -254,13 +254,15 @@ public class SideConnection {
      * @throws SQLException if there is an SQL Error.
      */
     Boolean checkPageTable(String text) throws SQLException {
+        text = text.toUpperCase();
         dPrint("Checking for the table " + text);
-
         DatabaseMetaData md = DB.conn.getMetaData();
-        ResultSet rs = md.getTables(null, null, text, null);
+        ResultSet rs = md.getTables("INDIVIDUAL NAMES", null, text, null);
         if (rs.next()) {
+            dPrint("Table Found");
             return true;
         } else {
+            dPrint("Table Not Found");
             return false;
         }
     }
@@ -301,21 +303,34 @@ public class SideConnection {
         String parentURL = updateLink[2];
         String parentTxt = updateLink[3];
         parentTxt = fixName(parentTxt);
-        dPrint("Ready to send sql");
-        String sql;
+        int parentID = makeID(parentURL);
 
-        if (!checkPageTable(tableName)) {
+        String sql =
+                "SELECT * FROM `individual names`.`" + tableName + "` WHERE " +
+                        "`RecordID`='" + parentID +
+                        "';";
+        ResultSet rs = DB.runSql(sql);
+
+        if (!rs.next()) {
             //insert the URL into the table.
             sql = "INSERT INTO `individual names`.`" + tableName + "` (`RecordID" +
                     "`, `URL`, `PageTitle`, " +
                     "`ParentLink`) " +
-                    "VALUES ('" + makeID(parentURL) + "', '" + parentURL + "', '"
+                    "VALUES ('" + parentID + "', '" + parentURL + "', '"
                     + parentTxt + "', '1');";
             Statement stmt = DB.conn.createStatement();
             stmt.executeUpdate(sql);
         } else {
-            dPrint("UNOPTIMIZED CODE: ATTEMPTING TO ADD ALREADY PRESENT " +
-                    "PARENT");
+            sql = "SELECT * FROM `individual names`.`" + tableName + "` WHERE " +
+                    "`RecordID`='" + parentID +
+                    "' AND `ParentLink`='1';";
+            rs = DB.runSql(sql);
+            if (!rs.next()) {
+                sql = "UPDATE `individual names`.`" + tableName + "` SET `ParentLink" +
+                        "`='1' WHERE `RecordID`='" + parentID + "'";
+                Statement stmt = DB.conn.createStatement();
+                stmt.executeUpdate(sql);
+            }
         }
     }
 
@@ -365,7 +380,7 @@ public class SideConnection {
                     createPageTable(URL, this.pageTitle, parentURL, parentText);
                 } else {
                     dPrint("TABLE ALREADY CREATED");
-                    addParent(text, currentlink);
+                    addParent(this.pageTitle, currentlink);
                 }
                 Elements linksOnPage = this.htmlDocument.select("a[href]");
                 dPrint("Found (" + linksOnPage.size() + ") on page.");
@@ -375,11 +390,13 @@ public class SideConnection {
                     checkedLink[1] = link.text();
                     checkedLink[2] = URL;
                     checkedLink[3] = text;
-                    if (!presentInChecked(checkedLink[0])) {
-                        this.pagestoVisit.add(checkedLink);
-                        dPrint("ADDING TO pagesToVisit");
+                    if (isParent(checkedLink[0], initialURL)) {
+                        if (!presentInChecked(checkedLink[0])) {
+                            this.pagestoVisit.add(checkedLink);
+                            dPrint("ADDING TO pagesToVisit");
+                        }
+                        this.submitToPageTable(text, checkedLink);
                     }
-                    this.submitToPageTable(text, checkedLink);
                 }
                 this.check(URL, text);
                 this.pagestoVisitQueue.addAll(pagestoVisit);
