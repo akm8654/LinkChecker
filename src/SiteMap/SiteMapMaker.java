@@ -37,7 +37,7 @@ public class SiteMapMaker {
             System.out.println("Error: " + e.getErrorCode());
             System.out.print("STACK TRACE: ");
             e.printStackTrace();
-        }catch (IOException IOe) {
+        } catch (IOException IOe) {
             System.out.println("IO EXCEPTION FOUND! TERMINATING PROGRAM!");
             System.out.print("STACK TRACE: ");
             IOe.printStackTrace();
