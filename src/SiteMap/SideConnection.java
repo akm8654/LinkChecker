@@ -1,13 +1,13 @@
 package SiteMap;
 
 import org.jsoup.Connection;
+import org.jsoup.HttpStatusException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.io.IOException;
-import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -63,7 +63,7 @@ public class SideConnection {
     /**
      * Holds all the pages that need to be visited.
      */
-    private Set<String[]> pagestoVisit = new HashSet<>();
+    private Set<String> pagestoVisit = new HashSet<>();
     private Set<String[]> pagesVisited = new HashSet<>();
     private List<String[]> pagestoVisitQueue = new LinkedList<>();
 
@@ -96,9 +96,14 @@ public class SideConnection {
     private String fixName(String original) {
         String[] names = original.split("\\|");
         original = names[0];
+        names = original.split(":");
+        original = names[0];
         original = original.replaceAll("'", "");
         original = original.replaceAll(" ", "");
         original = original.toLowerCase();
+        if (original.length() > 64) {
+            original = original.substring(0, 63);
+        }
         return original;
     }
 
@@ -191,8 +196,10 @@ public class SideConnection {
         dPrint("Creating table named " + text);
 
         String sql = "CREATE TABLE `individual names`.`" + text + "` ( `PageTitle` " +
-                "TEXT NOT NULL , `RecordID` INT NOT NULL , `URL` TEXT NOT NULL ," +
-                " `ParentLink` " +
+                "TEXT NOT NULL , `RecordID` INT NOT NULL, FOREIGN KEY " +
+                "(`RecordID`) " +
+                "REFERENCES `crawler`.`record`(`RecordID`)  , `URL` TEXT NOT " +
+                "NULL, `ParentLink` " +
                 "BOOLEAN NOT NULL DEFAULT FALSE ) ENGINE = " +
                 "MyISAM;";
         Statement stmt = DB.conn.createStatement();
@@ -204,8 +211,10 @@ public class SideConnection {
                 "', '1');";
         stmt.executeUpdate(sql);
 
-        sql = "INSERT INTO `crawler`.`pagetables` (`tableName`, `tableURL`) " +
-                "VALUE ('" + text + "', '" + URL + "');";
+        sql = "INSERT INTO `crawler`.`pagetables` (`tableName`, `tableURL`, " +
+                "`RecordID`)" +
+                " " +
+                "VALUE ('" + text + "', '" + URL + "', '" + makeID(URL) + "');";
         stmt.executeUpdate(sql);
     }
 
@@ -234,13 +243,13 @@ public class SideConnection {
      *
      * @throws SQLException - sometimes things go wrong.
      */
-    void beginCrawl() throws SQLException {
+    void beginCrawl() {
         String[] initialURLArray = new String[4];
         initialURLArray[0] = this.initialURL;
         initialURLArray[1] = this.pageTitle;
         initialURLArray[2] = this.initialURL;
         initialURLArray[3] = this.pageTitle;
-        this.pagestoVisit.add(initialURLArray);
+        this.pagestoVisit.add(initialURLArray[2]);
         this.pagestoVisitQueue.add(initialURLArray);
         while (pagestoVisitQueue.size() != 0) {
             String[] currentURL;
@@ -260,7 +269,7 @@ public class SideConnection {
      * Determines if the table exists or not.
      *
      * @param text the table name
-     * @param URL the url of the top link
+     * @param URL  the url of the top link
      * @return true if exists, false if not.
      * @throws SQLException if there is an SQL Error.
      */
@@ -295,7 +304,7 @@ public class SideConnection {
      * @param linkToSubmit
      * @throws SQLException
      */
-    private void submitToPageTable(String tableName, String[] linkToSubmit)
+    public void submitToPageTable(String tableName, String[] linkToSubmit)
             throws SQLException {
         String sql;
         linkToSubmit[1] = fixName(linkToSubmit[1]);
@@ -304,7 +313,8 @@ public class SideConnection {
 
         Statement stmt = DB.conn.createStatement();
         sql =
-                "SELECT * FROM `record` WHERE `RecordID`='" + makeID(URL) +
+                "SELECT * FROM `individual names`.`" + tableName + "` WHERE " +
+                        "`RecordID`='" + makeID(URL) +
                         "';";
         ResultSet rs = DB.runSql(sql);
         if (rs.next()) {
@@ -366,16 +376,12 @@ public class SideConnection {
      * @param linkToAdd the link to add.
      * @throws SQLException If there is an SQL Error
      */
-    private void addBrokenLink(String[] linkToAdd) throws SQLException {
+    private void addBrokenLink(String[] linkToAdd, int ErrorCode) throws SQLException {
         Statement stmt = DB.conn.createStatement();
         String URL = linkToAdd[0];
-        String text = linkToAdd[1];
-        text = fixName(text);
-        String parentURL = linkToAdd[2];
-        String sql = "INSERT INTO `broken` (`RecordID`, `Page Title`, `URL`, " +
-                "`On Page URL`) VALUES " +
-                "('" + makeID(URL) + "', '" + text + "', '" + URL + "', '" +
-                parentURL + "')";
+        String sql = "INSERT INTO `brokenlinks` (`RecordID`, `URL`, " +
+                "`Error`) VALUES " +
+                "('" + makeID(URL) + "', '" + URL + "', '" + ErrorCode + "')";
         stmt.executeUpdate(sql);
     }
 
@@ -402,7 +408,9 @@ public class SideConnection {
 
             String tableTitle;
 
-            if (conn.response().statusCode() == 200) {
+            int responseCode = conn.response().statusCode();
+
+            if (responseCode == 200) {
                 check(URL, text);
                 dPrint("Web Page Received, checking table " + this.pageTitle);
                 int pageCheck = checkPageTable(this.pageTitle, URL);
@@ -439,6 +447,7 @@ public class SideConnection {
                                         parentText);
                                 break;
                             }
+                            i++;
                         }
                     }
                 }
@@ -452,19 +461,29 @@ public class SideConnection {
                     checkedLink[3] = text;
                     if (isParent(checkedLink[0], initialURL)) {
                         if (!presentInChecked(checkedLink[0])) {
-                            if (!pagestoVisit.contains(checkedLink)) {
-                                this.pagestoVisit.add(checkedLink);
+                            if (!pagestoVisit.contains(checkedLink[0])) {
+                                this.pagestoVisit.add(checkedLink[0]);
+                                this.pagestoVisitQueue.add(checkedLink);
                                 dPrint("Adding to pagesToVisit");
                             }
                         }
                     }
                     this.submitToPageTable(tableTitle, checkedLink);
                 }
-                this.pagestoVisitQueue.addAll(pagestoVisit);
             } else {
-                this.addBrokenLink(currentlink);
+                this.addBrokenLink(currentlink, responseCode);
             }
             this.pagesVisited.add(currentlink);
+        } catch (HttpStatusException httpE) {
+            int statusCode = httpE.getStatusCode();
+            String URL = httpE.getUrl();
+            String[] link = new String[4];
+            link[0] = URL;
+            try {
+                addBrokenLink(link, statusCode);
+            } catch (SQLException e) {
+                e.printStackTrace();
+            }
         } catch (IOException e) {
             e.printStackTrace();
         } catch (SQLException sqlE) {

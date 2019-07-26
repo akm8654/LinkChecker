@@ -28,7 +28,7 @@ public class SiteMapMaker {
         //System.out.println("Enter top level URL: ");
 
         //String parentURL = userIn.nextLine();
-        String parentURL = "https://www.rit.edu/academicaffairs/memos";
+        String parentURL = "https://www.rit.edu/academicaffairs/";
         try {
             SideConnection side = new SideConnection(parentURL);
             side.beginCrawl();
