@@ -8,6 +8,7 @@ import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
 import java.io.IOException;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -60,11 +61,13 @@ public class SideConnection {
      * The database where everything is added too.
      */
     public static Database DB;
+
+    private int start;
     /**
      * Holds all the pages that need to be visited.
      */
     private Set<String> pagestoVisit = new HashSet<>();
-    private Set<String[]> pagesVisited = new HashSet<>();
+
     private List<String[]> pagestoVisitQueue = new LinkedList<>();
 
     /**
@@ -119,7 +122,9 @@ public class SideConnection {
         this.pageTitle = this.pageTitle.replaceAll("'", "");
         this.pageTitle = this.pageTitle.replaceAll(" ", "");
         this.pageTitle = this.pageTitle.toLowerCase();
-        dPrint(pageTitle);
+        if (this.pageTitle.length() > 64) {
+            this.pageTitle = this.pageTitle.substring(0, 63);
+        }
     }
 
     /**
@@ -193,6 +198,7 @@ public class SideConnection {
      */
     private void createPageTable(String URL, String text, String parentURL,
                                  String parentTxt) throws SQLException {
+        text = fixName(text);
         dPrint("Creating table named " + text);
 
         String sql = "CREATE TABLE `individual names`.`" + text + "` ( `PageTitle` " +
@@ -239,22 +245,77 @@ public class SideConnection {
     }
 
     /**
+     * Initializes the Visit Queue for use
+     *
+     * @return the position number that the queue starts at
+     * @throws SQLException SOMETHING WENT WRONG.
+     */
+    private int getQueueStart() throws SQLException {
+        String sql =
+                "SELECT * FROM `crawler`.`visitqueue` WHERE `POS`=(SELECT " +
+                        "MIN(`POS`) FROM `crawler`.`visitqueue`);";
+        ResultSet rs = DB.runSql(sql);
+        if (rs.next()) {
+            return rs.getInt("POS");
+        } else {
+            return 1;
+        }
+    }
+
+    /**
+     * Takes the queue from the database and copies it to the memory.
+     *
+     * @return the queue
+     */
+    private List<String[]> initializeQueue() throws SQLException {
+        List<String[]> currentQueue = new LinkedList<>();
+        String sql = "SELECT * FROM `crawler`.`visitqueue`";
+        ResultSet rs = DB.runSql(sql);
+        String[] link = new String[4];
+        while (rs.next()) {
+            link[0] = rs.getString("URL");
+            link[1] = rs.getString("text");
+            link[2] = rs.getString("parentURL");
+            link[3] = rs.getString("parentText");
+            currentQueue.add(link);
+            this.pagestoVisit.add(link[0]);
+        }
+        return currentQueue;
+    }
+
+    /**
      * Starts the crawl and recursively looks through websites.
      *
      * @throws SQLException - sometimes things go wrong.
      */
     void beginCrawl() {
+        try {
+            this.start = getQueueStart();
+            this.pagestoVisitQueue = initializeQueue();
+        } catch (SQLException e) {
+            e.printStackTrace();
+            System.exit(1);
+        }
         String[] initialURLArray = new String[4];
         initialURLArray[0] = this.initialURL;
         initialURLArray[1] = this.pageTitle;
         initialURLArray[2] = this.initialURL;
         initialURLArray[3] = this.pageTitle;
-        this.pagestoVisit.add(initialURLArray[2]);
-        this.pagestoVisitQueue.add(initialURLArray);
+        if (!this.pagestoVisit.contains(initialURL)) {
+            this.pagestoVisit.add(initialURLArray[2]);
+            this.pagestoVisitQueue.add(initialURLArray);
+        }
         while (pagestoVisitQueue.size() != 0) {
             String[] currentURL;
             currentURL = this.pagestoVisitQueue.remove(0);
             this.pagestoVisit.remove(currentURL);
+            try {
+                removeFromQueue(this.start);
+                this.start++;
+            } catch (SQLException e) {
+                e.printStackTrace();
+                System.exit(1);
+            }
             dPrint(pagestoVisitQueue.size());
             if (isParent(currentURL[0], initialURL)) {
                 dPrint("Checking: " + currentURL[0]);
@@ -386,6 +447,51 @@ public class SideConnection {
     }
 
     /**
+     * Checks if the given file is a file extension or not.
+     *
+     * @param fileExt the file extension
+     * @return whether it is or not.
+     */
+    private boolean docCheck(String fileExt) {
+        if (fileExt.contains(".")) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Adds the link to the queue if not already there.
+     *
+     * @param link the link to add
+     * @param i    the number that we are on
+     * @throws SQLException in case of an SQLException
+     */
+    private void addToQueue(String[] link, int i) throws SQLException {
+        String URL = link[0];
+        String text = link[1];
+        String parentURL = link[2];
+        String parentText = link[3];
+
+        String sql = "INSERT INTO `crawler`.`visitqueue`(`POS`, `URL`, " +
+                "`text`, `parentURL`, `parentText`) VALUES (?, ?, ?, " +
+                "?, ?);";
+        PreparedStatement stmt = DB.conn.prepareStatement(sql);
+        stmt.setInt(1, i);
+        stmt.setString(2, URL);
+        stmt.setString(3, text);
+        stmt.setString(4, parentURL);
+        stmt.setString(5, parentText);
+        stmt.executeUpdate();
+    }
+
+    private void removeFromQueue(int i) throws SQLException {
+        String sql = "DELETE FROM `crawler`.`visitqueue` WHERE `POS`='" + i +
+                "';";
+        DB.runSql2(sql);
+    }
+
+    /**
      * The code that visits the page requested, determining if it needs to
      * access the table and more.
      *
@@ -398,82 +504,94 @@ public class SideConnection {
             String parentURL = currentlink[2];
             String parentText = currentlink[3];
             text = fixName(text);
-
+            Document htmlDoc;
             Connection conn = Jsoup.connect(currentlink[0]);
-            conn.userAgent(USER_AGENT);
-            Document htmlDoc = conn.get();
-            dPrint("Visiting Page: " + URL);
-            this.htmlDocument = htmlDoc;
-            setTitle();
-
-            String tableTitle;
-
-            int responseCode = conn.response().statusCode();
-
-            if (responseCode == 200) {
-                check(URL, text);
-                dPrint("Web Page Received, checking table " + this.pageTitle);
-                int pageCheck = checkPageTable(this.pageTitle, URL);
-                if (pageCheck == 0) {
-                    dPrint("Creating page table, and looking for links");
-                    tableTitle = this.pageTitle;
-                    createPageTable(URL, this.pageTitle, parentURL, parentText);
-                } else if (pageCheck == 1) {
-                    dPrint("Table created already, needs to add parent.");
-                    tableTitle = this.pageTitle;
-                    addParent(this.pageTitle, currentlink);
+            String fileExt = URL.substring(URL.length() - 4,
+                    URL.length());
+            if (docCheck(fileExt)) {
+                if (conn.response().statusCode() >= 400) {
+                    check(URL, text);
+                    addBrokenLink(currentlink, conn.response().statusCode());
                 } else {
-                    String newTitle = this.pageTitle + text;
-                    pageCheck = checkPageTable(newTitle, URL);
-                    if (pageCheck == 1) {
-                        addParent(newTitle, currentlink);
-                        tableTitle = newTitle;
-                    } else if (pageCheck == 0) {
-                        tableTitle = newTitle;
-                        createPageTable(URL, newTitle, parentURL, parentText);
-                    } else {
-                        int i = 1;
-                        String newTitle2;
-                        while (true) {
-                            newTitle2 = newTitle + i;
-                            pageCheck = checkPageTable(newTitle2, URL);
-                            if (pageCheck == 1) {
-                                addParent(newTitle, currentlink);
-                                tableTitle = newTitle;
-                                break;
-                            } else if (pageCheck == 0) {
-                                tableTitle = newTitle2;
-                                createPageTable(URL, tableTitle, parentURL,
-                                        parentText);
-                                break;
-                            }
-                            i++;
-                        }
-                    }
-                }
-                Elements linksOnPage = this.htmlDocument.select("a[href]");
-                dPrint("Found (" + linksOnPage.size() + ") on page.");
-                for (Element link : linksOnPage) {
-                    String[] checkedLink = new String[4];
-                    checkedLink[0] = link.absUrl("href");
-                    checkedLink[1] = link.text();
-                    checkedLink[2] = URL;
-                    checkedLink[3] = text;
-                    if (isParent(checkedLink[0], initialURL)) {
-                        if (!presentInChecked(checkedLink[0])) {
-                            if (!pagestoVisit.contains(checkedLink[0])) {
-                                this.pagestoVisit.add(checkedLink[0]);
-                                this.pagestoVisitQueue.add(checkedLink);
-                                dPrint("Adding to pagesToVisit");
-                            }
-                        }
-                    }
-                    this.submitToPageTable(tableTitle, checkedLink);
+                    check(URL, text);
                 }
             } else {
-                this.addBrokenLink(currentlink, responseCode);
+                conn.userAgent(USER_AGENT).ignoreContentType(true);
+                htmlDoc = conn.get();
+                this.htmlDocument = htmlDoc;
+                dPrint("Visiting Page: " + URL);
+                setTitle();
+
+                String tableTitle;
+
+                int responseCode = conn.response().statusCode();
+
+                check(URL, text);
+                if (responseCode == 200) {
+                    dPrint("Web Page Received, checking table " + this.pageTitle);
+                    int pageCheck = checkPageTable(this.pageTitle, URL);
+                    if (pageCheck == 0) {
+                        dPrint("Creating page table, and looking for links");
+                        tableTitle = this.pageTitle;
+                        createPageTable(URL, this.pageTitle, parentURL, parentText);
+                    } else if (pageCheck == 1) {
+                        dPrint("Table created already, needs to add parent.");
+                        tableTitle = this.pageTitle;
+                        addParent(this.pageTitle, currentlink);
+                    } else {
+                        String newTitle = this.pageTitle + text;
+                        newTitle = fixName(newTitle);
+                        pageCheck = checkPageTable(newTitle, URL);
+                        if (pageCheck == 1) {
+                            addParent(newTitle, currentlink);
+                            tableTitle = newTitle;
+                        } else if (pageCheck == 0) {
+                            tableTitle = newTitle;
+                            createPageTable(URL, newTitle, parentURL, parentText);
+                        } else {
+                            int i = 1;
+                            String newTitle2;
+                            while (true) {
+                                newTitle2 = newTitle + i;
+                                pageCheck = checkPageTable(newTitle2, URL);
+                                if (pageCheck == 1) {
+                                    addParent(newTitle, currentlink);
+                                    tableTitle = newTitle;
+                                    break;
+                                } else if (pageCheck == 0) {
+                                    tableTitle = newTitle2;
+                                    createPageTable(URL, tableTitle, parentURL,
+                                            parentText);
+                                    break;
+                                }
+                                i++;
+                            }
+                        }
+                    }
+                    Elements linksOnPage = this.htmlDocument.select("a[href]");
+                    dPrint("Found (" + linksOnPage.size() + ") on page.");
+                    for (Element link : linksOnPage) {
+                        String[] checkedLink = new String[4];
+                        checkedLink[0] = link.absUrl("href");
+                        checkedLink[1] = link.text();
+                        checkedLink[2] = URL;
+                        checkedLink[3] = text;
+                        if (isParent(checkedLink[0], initialURL)) {
+                            if (!presentInChecked(checkedLink[0])) {
+                                if (!pagestoVisit.contains(checkedLink[0])) {
+                                    this.pagestoVisit.add(checkedLink[0]);
+                                    addToQueue(checkedLink, this.start);
+                                    this.pagestoVisitQueue.add(checkedLink);
+                                    dPrint("Adding to pagesToVisit");
+                                }
+                            }
+                        }
+                        this.submitToPageTable(tableTitle, checkedLink);
+                    }
+                } else {
+                    this.addBrokenLink(currentlink, responseCode);
+                }
             }
-            this.pagesVisited.add(currentlink);
         } catch (HttpStatusException httpE) {
             int statusCode = httpE.getStatusCode();
             String URL = httpE.getUrl();
